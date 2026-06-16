@@ -5,15 +5,16 @@ import { RoundSetup } from '@/components/RoundSetup';
 import { GroupManager } from '@/components/GroupManager';
 import { DrawControl } from '@/components/DrawControl';
 import { DanmakuPanel } from '@/components/DanmakuPanel';
+import { ActivityDashboard } from '@/components/ActivityDashboard';
 import { useStore } from '@/store/useStore';
-import { Play, Square, Users, Trophy, Clock, AlertCircle } from 'lucide-react';
+import { Play, Square, Users, Trophy, Clock, AlertCircle, BarChart3 } from 'lucide-react';
 import { useSocket } from '@/hooks/useSocket';
 import { api } from '@/utils/api';
 
 export default function Console() {
   const { currentActivity, candidates, rounds, winners, groups, setCandidates, setRounds, setWinners, setDanmaku, setGroups } = useStore();
   const [currentRoundId, setCurrentRoundId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'draw' | 'candidates' | 'groups' | 'danmaku'>('draw');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'draw' | 'candidates' | 'groups' | 'danmaku'>('dashboard');
   const [loading, setLoading] = useState(false);
 
   useSocket(currentActivity?.id);
@@ -194,71 +195,90 @@ export default function Console() {
 
         <div className="flex gap-2 mb-6 border-b border-white/5 pb-2">
           {[
-            { key: 'draw', label: '抽签控制' },
-            { key: 'candidates', label: '候选名单' },
-            { key: 'groups', label: '分组管理' },
-            { key: 'danmaku', label: '弹幕管理' },
+            { key: 'dashboard', label: '活动看板', icon: BarChart3 },
+            { key: 'draw', label: '抽签控制', icon: Play },
+            { key: 'candidates', label: '候选名单', icon: Users },
+            { key: 'groups', label: '分组管理', icon: Users },
+            { key: 'danmaku', label: '弹幕管理', icon: AlertCircle },
           ].map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key as typeof activeTab)}
-              className={`px-6 py-2.5 rounded-t-xl font-medium transition-all ${
+              className={`px-5 py-2.5 rounded-t-xl font-medium transition-all flex items-center gap-2 ${
                 activeTab === tab.key
                   ? 'bg-dark-300 text-white border-t border-x border-primary-500/30'
                   : 'text-gray-500 hover:text-white hover:bg-white/5'
               }`}
             >
+              <tab.icon size={16} />
               {tab.label}
             </button>
           ))}
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-1 space-y-6">
-            <RoundSetup
-              activityId={currentActivity.id}
+        {activeTab === 'dashboard' ? (
+          <div className="grid grid-cols-1 gap-6">
+            <ActivityDashboard
+              candidates={candidates}
               rounds={rounds}
               winners={winners}
+              groups={groups}
               currentRoundId={currentRoundId}
-              onUpdate={loadData}
-              onSelectRound={setCurrentRoundId}
+              onSelectRound={(roundId) => {
+                setCurrentRoundId(roundId);
+                if (roundId) setActiveTab('draw');
+              }}
             />
           </div>
-
-          <div className="col-span-2">
-            {activeTab === 'draw' && (
-              <DrawControl
+        ) : (
+          <div className="grid grid-cols-3 gap-6">
+            <div className="col-span-1 space-y-6">
+              <RoundSetup
                 activityId={currentActivity.id}
-                currentRound={currentRound}
-                candidates={candidates}
+                rounds={rounds}
                 winners={winners}
+                currentRoundId={currentRoundId}
                 onUpdate={loadData}
+                onSelectRound={setCurrentRoundId}
               />
-            )}
-            {activeTab === 'candidates' && (
-              <CandidateList
-                activityId={currentActivity.id}
-                candidates={candidates}
-                groups={groups}
-                onUpdate={loadData}
-              />
-            )}
-            {activeTab === 'groups' && (
+            </div>
+
+            <div className="col-span-2">
+              {activeTab === 'draw' && (
+                <DrawControl
+                  activityId={currentActivity.id}
+                  currentRound={currentRound}
+                  candidates={candidates}
+                  winners={winners}
+                  onUpdate={loadData}
+                />
+              )}
+              {activeTab === 'candidates' && (
+                <CandidateList
+                  activityId={currentActivity.id}
+                  candidates={candidates}
+                  groups={groups}
+                  onUpdate={loadData}
+                />
+              )}
+              {activeTab === 'groups' && (
               <GroupManager
                 activityId={currentActivity.id}
                 groups={groups}
                 candidates={candidates}
+                rounds={rounds}
                 onUpdate={loadData}
               />
             )}
-            {activeTab === 'danmaku' && (
-              <DanmakuPanel
-                activityId={currentActivity.id}
-                onUpdate={loadData}
-              />
-            )}
+              {activeTab === 'danmaku' && (
+                <DanmakuPanel
+                  activityId={currentActivity.id}
+                  onUpdate={loadData}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </Layout>
   );

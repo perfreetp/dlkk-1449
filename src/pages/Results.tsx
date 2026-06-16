@@ -4,14 +4,22 @@ import { useStore } from '@/store/useStore';
 import { api } from '@/utils/api';
 import { useSocket } from '@/hooks/useSocket';
 import { formatDate, formatTime, exportToCSV } from '@/utils/format';
-import { Trophy, Search, Download, ListOrdered, History, CheckCircle, XCircle, Package, Clock, Filter } from 'lucide-react';
-import type { Winner, DrawRound, Activity } from '../../shared/types';
+import { Trophy, Search, Download, ListOrdered, History, CheckCircle, XCircle, Package, Clock, Filter, Ban, AlertTriangle, TrendingUp, Users2 } from 'lucide-react';
+import type { Winner, DrawRound, Activity, Candidate } from '../../shared/types';
+
+type SearchStatus = 'valid_winner' | 'invalid_winner' | 'not_won' | 'not_found' | 'multi_matches';
+
+interface SearchResult {
+  status: SearchStatus;
+  matches: Winner[];
+  candidate?: Candidate;
+}
 
 export default function Results() {
-  const { activities, rounds, winners, setActivities, setRounds, setWinners, operationLogs, setOperationLogs } = useStore();
+  const { activities, rounds, winners, candidates, setActivities, setRounds, setWinners, operationLogs, setOperationLogs, setCandidates } = useStore();
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResult, setSearchResult] = useState<{ found: boolean; winner?: Winner } | null>(null);
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [activeTab, setActiveTab] = useState<'winners' | 'order' | 'query' | 'logs'>('winners');
   const [filterRound, setFilterRound] = useState<string | null>(null);
 
@@ -39,15 +47,17 @@ export default function Results() {
 
   const loadActivityData = async (activityId: string) => {
     try {
-      const [roundsRes, winnersRes, logsRes] = await Promise.all([
+      const [roundsRes, winnersRes, logsRes, candidatesRes] = await Promise.all([
         api.rounds.list(activityId),
         api.winners.list(activityId),
         api.logs.list(activityId),
+        api.candidates.list(activityId),
       ]);
 
       if (roundsRes.success) setRounds(roundsRes.data || []);
       if (winnersRes.success) setWinners(winnersRes.data || []);
       if (logsRes.success) setOperationLogs(logsRes.data || []);
+      if (candidatesRes.success) setCandidates(candidatesRes.data || []);
     } catch (error) {
       console.error('Load activity data failed:', error);
     }
@@ -71,19 +81,41 @@ export default function Results() {
       setSearchResult(null);
       return;
     }
-    
+
     const query = searchQuery.trim().toLowerCase();
-    const found = winners.find(w => 
-      !w.isInvalid && (
-        w.candidate?.number.toLowerCase() === query ||
-        w.candidate?.nickname?.toLowerCase() === query
-      )
+    const matches = winners.filter(w =>
+      w.candidate?.number.toLowerCase() === query ||
+      (w.candidate?.nickname && w.candidate?.nickname.toLowerCase() === query)
     );
-    
-    setSearchResult({
-      found: !!found,
-      winner: found,
-    });
+    const matchCandidate = candidates.find(c =>
+      c.number.toLowerCase() === query ||
+      (c.nickname && c.nickname.toLowerCase() === query)
+    );
+
+    if (matches.length === 0 && !matchCandidate) {
+      setSearchResult({ status: 'not_found', matches: [] });
+      return;
+    }
+    if (matches.length === 0 && matchCandidate) {
+      setSearchResult({ status: 'not_won', matches: [], candidate: matchCandidate });
+      return;
+    }
+    const hasValid = matches.some(m => !m.isInvalid);
+    if (matches.length === 1) {
+      const m = matches[0];
+      setSearchResult({
+        status: !m.isInvalid ? 'valid_winner' : 'invalid_winner',
+        matches,
+        candidate: m.candidate || matchCandidate,
+      });
+      return;
+    }
+    if (hasValid && matches.filter(m => !m.isInvalid).length === 1) {
+      const m = matches.find(m => !m.isInvalid)!;
+      setSearchResult({ status: 'valid_winner', matches, candidate: m.candidate || matchCandidate });
+      return;
+    }
+    setSearchResult({ status: 'multi_matches', matches, candidate: matchCandidate });
   };
 
   const handleExport = () => {
@@ -446,52 +478,183 @@ export default function Results() {
                   </div>
 
                   {searchResult && (
-                    <div className={`p-8 rounded-2xl border-2 text-center ${
-                      searchResult.found 
-                        ? 'bg-neon-gold/10 border-neon-gold/50' 
-                        : 'bg-dark-300/50 border-white/10'
+                    <div className={`p-8 rounded-2xl border-2 ${
+                      searchResult.status === 'valid_winner'
+                        ? 'bg-neon-gold/10 border-neon-gold/50'
+                        : searchResult.status === 'invalid_winner'
+                          ? 'bg-red-500/10 border-red-500/40'
+                          : searchResult.status === 'not_won'
+                            ? 'bg-dark-300/50 border-primary-500/20'
+                            : searchResult.status === 'not_found'
+                              ? 'bg-dark-300/50 border-white/10'
+                              : 'bg-dark-300/50 border-primary-500/30'
                     }`}>
-                      {searchResult.found && searchResult.winner ? (
+                      {searchResult.status === 'valid_winner' && searchResult.matches.find(m => !m.isInvalid) ? (
+                        (() => {
+                          const winner = searchResult.matches.find(m => !m.isInvalid)!;
+                          const round = rounds.find(r => r.id === winner.roundId);
+                          return (
+                            <>
+                              <div className="w-20 h-20 rounded-full bg-neon-gold/20 flex items-center justify-center mx-auto mb-4">
+                                <Trophy className="text-neon-gold" size={40} />
+                              </div>
+                              <h4 className="text-2xl font-bold text-neon-gold mb-2">恭喜！已中奖</h4>
+                              <div className="space-y-2.5 text-left max-w-md mx-auto mt-4 text-gray-300">
+                                <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500">编号</span>
+                                  <span className="font-bold text-white text-lg">{winner.candidate?.number}</span>
+                                </div>
+                                {winner.candidate?.nickname && (
+                                  <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                    <span className="text-gray-500">昵称</span>
+                                    <span className="text-white">{winner.candidate.nickname}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500">所属轮次</span>
+                                  <span className="px-2.5 py-1 rounded-full bg-primary-500/20 text-primary-300 text-xs font-medium">
+                                    {round ? `第 ${round.roundNumber} 轮 · ${round.name}` : winner.roundId}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500">抽取顺序</span>
+                                  <span className="text-white">#{winner.drawOrder}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500">中奖时间</span>
+                                  <span className="text-white">{formatDate(winner.createdAt)} {formatTime(winner.createdAt)}</span>
+                                </div>
+                                {winner.isReplenishment && (
+                                  <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                    <span className="text-gray-500">中奖类型</span>
+                                    <span className="px-2.5 py-1 rounded-full bg-neon-pink/20 text-neon-pink text-xs font-medium flex items-center gap-1">
+                                      <TrendingUp size={12} /> 补位中奖
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          );
+                        })()
+                      ) : searchResult.status === 'invalid_winner' && searchResult.matches[0] ? (
+                        (() => {
+                          const winner = searchResult.matches[0];
+                          const round = rounds.find(r => r.id === winner.roundId);
+                          return (
+                            <>
+                              <div className="w-20 h-20 rounded-full bg-red-500/15 flex items-center justify-center mx-auto mb-4">
+                                <Ban className="text-red-400" size={40} />
+                              </div>
+                              <h4 className="text-2xl font-bold text-red-300 mb-1">中奖记录已失效</h4>
+                              <p className="text-sm text-red-400/80 mb-4">原中奖结果已被主播取消或对应编号被拉黑</p>
+                              <div className="space-y-2.5 text-left max-w-md mx-auto mt-4 text-gray-300">
+                                <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500">编号</span>
+                                  <span className="font-bold text-white text-lg">{winner.candidate?.number}</span>
+                                </div>
+                                <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500">所属轮次</span>
+                                  <span className="px-2.5 py-1 rounded-full bg-gray-500/20 text-gray-300 text-xs font-medium">
+                                    {round ? `第 ${round.roundNumber} 轮 · ${round.name}` : winner.roundId}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500">原中奖时间</span>
+                                  <span className="text-white">{formatDate(winner.createdAt)}</span>
+                                </div>
+                                <div className="flex items-start justify-between py-1.5 border-b border-white/5">
+                                  <span className="text-gray-500 flex items-center gap-1">
+                                    <AlertTriangle size={14} /> 失效原因
+                                  </span>
+                                  <span className="text-red-300 text-right ml-2 max-w-[70%] text-sm">
+                                    {winner.invalidReason || '已取消'}
+                                  </span>
+                                </div>
+                                {winner.isReplenishment && (
+                                  <p className="text-xs text-gray-500 pt-1 text-center">
+                                    此为补位中奖记录
+                                  </p>
+                                )}
+                              </div>
+                            </>
+                          );
+                        })()
+                      ) : searchResult.status === 'not_won' && searchResult.candidate ? (
                         <>
-                          <div className="w-20 h-20 rounded-full bg-neon-gold/20 flex items-center justify-center mx-auto mb-4">
-                            <Trophy className="text-neon-gold" size={40} />
+                          <div className="w-20 h-20 rounded-full bg-primary-500/15 flex items-center justify-center mx-auto mb-4">
+                            <Users2 className="text-primary-400" size={40} />
                           </div>
-                          <h4 className="text-2xl font-bold text-neon-gold mb-2">恭喜！已中奖</h4>
-                          <div className="space-y-2 text-gray-300">
-                            <p>
-                              <span className="text-gray-500">编号：</span>
-                              <span className="font-bold text-white">{searchResult.winner.candidate?.number}</span>
-                            </p>
-                            <p>
-                              <span className="text-gray-500">昵称：</span>
-                              <span className="text-white">{searchResult.winner.candidate?.nickname || '匿名'}</span>
-                            </p>
-                            <p>
-                              <span className="text-gray-500">轮次：</span>
-                              <span className="text-white">
-                                {rounds.find(r => r.id === searchResult.winner?.roundId)?.name}
-                              </span>
-                            </p>
-                            <p>
-                              <span className="text-gray-500">中奖时间：</span>
-                              <span className="text-white">{formatDate(searchResult.winner.createdAt)}</span>
-                            </p>
-                            {searchResult.winner.isReplenishment && (
-                              <p className="text-primary-300">
-                                注：此为补位中奖
-                              </p>
+                          <h4 className="text-2xl font-bold text-primary-300 mb-1">已进入候选池</h4>
+                          <p className="text-sm text-gray-400 mb-4">暂未抽中，请继续关注开奖</p>
+                          <div className="space-y-2.5 text-left max-w-md mx-auto mt-4 text-gray-300">
+                            <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                              <span className="text-gray-500">编号</span>
+                              <span className="font-bold text-white text-lg">{searchResult.candidate.number}</span>
+                            </div>
+                            {searchResult.candidate.nickname && (
+                              <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                <span className="text-gray-500">昵称</span>
+                                <span className="text-white">{searchResult.candidate.nickname}</span>
+                              </div>
                             )}
+                            {searchResult.candidate.isBlacklisted ? (
+                              <div className="flex items-start justify-between py-1.5 border-b border-white/5">
+                                <span className="text-gray-500">参与状态</span>
+                                <span className="text-red-400 text-right">编号已在黑名单，不会参与抽取</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between py-1.5 border-b border-white/5">
+                                <span className="text-gray-500">参与状态</span>
+                                <span className="text-green-300">正常参与抽取</span>
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-500 pt-2 text-center">
+                              共 {winners.filter(w => !w.isInvalid).length} 位已中奖 / {rounds.reduce((s, r) => s + r.drawCount, 0)} 个名额
+                            </div>
                           </div>
                         </>
-                      ) : (
+                      ) : searchResult.status === 'not_found' ? (
                         <>
                           <div className="w-20 h-20 rounded-full bg-dark-300 flex items-center justify-center mx-auto mb-4">
                             <XCircle className="text-gray-500" size={40} />
                           </div>
-                          <h4 className="text-2xl font-bold text-gray-400 mb-2">未查询到中奖记录</h4>
-                          <p className="text-gray-500">请确认输入的编号或昵称是否正确</p>
+                          <h4 className="text-2xl font-bold text-gray-400 mb-2">未找到该编号</h4>
+                          <p className="text-gray-500">当前活动候选池和中奖名单中都没有此编号，请确认活动是否正确或联系主播</p>
                         </>
-                      )}
+                      ) : searchResult.status === 'multi_matches' ? (
+                        <>
+                          <h4 className="text-xl font-bold text-white mb-4">查询到 {searchResult.matches.length} 条相关记录</h4>
+                          <div className="space-y-3 text-left">
+                            {searchResult.matches.map((winner) => {
+                              const round = rounds.find(r => r.id === winner.roundId);
+                              const valid = !winner.isInvalid;
+                              return (
+                                <div key={winner.id} className={`p-4 rounded-xl border ${
+                                  valid ? 'bg-neon-gold/5 border-neon-gold/30' : 'bg-red-500/5 border-red-500/20'
+                                }`}>
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className={`font-bold ${valid ? 'text-neon-gold' : 'text-red-300'}`}>
+                                      {valid ? '中奖' : '已失效'}
+                                    </span>
+                                    <span className="text-xs text-gray-400">
+                                      {round ? `第 ${round.roundNumber} 轮 · ${round.name}` : ''}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-4 text-sm">
+                                    <span className="text-white font-semibold">{winner.candidate?.number}</span>
+                                    <span className="text-gray-400">{winner.candidate?.nickname || '匿名'}</span>
+                                    <span className="text-gray-500">#{winner.drawOrder ?? '?'}</span>
+                                    <span className="text-gray-500">{formatDate(winner.createdAt)}</span>
+                                  </div>
+                                  {!valid && winner.invalidReason && (
+                                    <div className="text-xs text-red-400 mt-2">失效原因：{winner.invalidReason}</div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   )}
 

@@ -7,10 +7,14 @@ async function request<T = unknown>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    const headers = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    const headers: Record<string, string> = {};
+    if (!isFormData) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (options.headers) {
+      Object.assign(headers, options.headers as Record<string, string>);
+    }
 
     const response = await fetch(`${API_BASE}${url}`, {
       ...options,
@@ -77,7 +81,6 @@ export const api = {
       request<{ imported: number; skippedDuplicate: number; skippedBlacklist: number; skippedEmpty: number }>(`/activities/${id}/import`, {
         method: 'POST',
         body: formData,
-        headers: {},
       }),
     signup: (id: string, data: { number: string; nickname?: string; password?: string }) =>
       request<Candidate>(`/activities/${id}/signup`, {
@@ -173,7 +176,6 @@ export const api = {
       request<{ imported: number; skippedDuplicate: number; skippedEmpty: number; invalidatedWinnerCount: number }>('/blacklist/import', {
         method: 'POST',
         body: formData,
-        headers: {},
       }),
     remove: (id: string) =>
       request(`/blacklist/${id}`, {
