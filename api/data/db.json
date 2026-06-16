@@ -1,0 +1,26 @@
+{
+  "users": [
+    {
+      "id": "user-host-001",
+      "username": "host",
+      "role": "host",
+      "passwordHash": "$2a$10$57ERbm3j/roET10907UNC.ebcHrabOK9C/dD8czDKQ2yhRT50BHjy",
+      "createdAt": "2026-06-16T11:17:04.273Z"
+    },
+    {
+      "id": "user-assistant-001",
+      "username": "assistant",
+      "role": "assistant",
+      "passwordHash": "$2a$10$SlGIyStgyi0nUXYqBveZEOkKngttfG9Gvb52pf3s1ylITR0tRYU5G",
+      "createdAt": "2026-06-16T11:17:04.337Z"
+    }
+  ],
+  "activities": [],
+  "candidates": [],
+  "rounds": [],
+  "winners": [],
+  "danmaku": [],
+  "blacklist": [],
+  "operationLogs": [],
+  "groups": []
+}
