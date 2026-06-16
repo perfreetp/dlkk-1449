@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Layout } from '@/components/Layout';
 import { useStore } from '@/store/useStore';
 import { api } from '@/utils/api';
 import { formatDate } from '@/utils/format';
-import { Settings as SettingsIcon, Ban, Plus, Trash2, UserX, AlertCircle, Search } from 'lucide-react';
+import { Settings as SettingsIcon, Ban, Plus, Trash2, UserX, AlertCircle, Search, Upload } from 'lucide-react';
 
 export default function Settings() {
   const { blacklist, setBlacklist, currentUser } = useStore();
@@ -12,6 +12,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadBlacklist();
@@ -43,16 +44,15 @@ export default function Settings() {
         setShowAddModal(false);
         setNewBlacklist({ number: '', reason: '' });
         const { invalidatedWinnerCount, message } = res.data;
+        let text = '已加入黑名单（该编号不会参与任何抽取）';
         if (invalidatedWinnerCount > 0) {
-          setFeedbackMsg({
-            type: 'success',
-            text: `已加入黑名单，并使 ${invalidatedWinnerCount} 条中奖记录失效。${message || ''} 建议到控制台对应轮次进行异常重抽补位。`,
-          });
-        } else {
-          setFeedbackMsg({ type: 'success', text: res.data.message || '已加入黑名单' });
+          text = `已加入黑名单，并使 ${invalidatedWinnerCount} 条中奖记录失效（该编号不会参与任何抽取）。${message || ''} 建议到控制台对应轮次进行异常重抽补位。`;
+        } else if (message) {
+          text = message + '（该编号不会参与任何抽取）';
         }
+        setFeedbackMsg({ type: 'success', text });
         loadBlacklist();
-        setTimeout(() => setFeedbackMsg(null), 8000);
+        setTimeout(() => setFeedbackMsg(null), 10000);
       } else {
         setFeedbackMsg({ type: 'error', text: res.message || res.error || '添加失败' });
       }
@@ -61,6 +61,45 @@ export default function Settings() {
       setFeedbackMsg({ type: 'error', text: '添加失败，请稍后重试' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleImportBlacklist = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validExts = ['.xlsx', '.xls', '.csv'];
+    const fileName = file.name.toLowerCase();
+    if (!validExts.some(ext => fileName.endsWith(ext))) {
+      setFeedbackMsg({ type: 'error', text: '只支持 .xlsx、.xls、.csv 格式文件' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
+      if (importFileRef.current) importFileRef.current.value = '';
+      return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    setLoading(true);
+    setFeedbackMsg(null);
+    try {
+      const res = await api.blacklist.import(formData);
+      if (res.success && res.data) {
+        const { imported, skippedDuplicate, skippedEmpty, invalidatedWinnerCount } = res.data;
+        const parts: string[] = [];
+        parts.push(`成功导入 ${imported} 条（这些编号不会参与任何抽取）`);
+        if (skippedDuplicate > 0) parts.push(`跳过重复 ${skippedDuplicate} 条`);
+        if (skippedEmpty > 0) parts.push(`空行 ${skippedEmpty} 条`);
+        if (invalidatedWinnerCount > 0) parts.push(`已使 ${invalidatedWinnerCount} 条中奖记录失效，请到对应轮次补位重抽`);
+        setFeedbackMsg({ type: 'success', text: parts.join('，') });
+        loadBlacklist();
+        setTimeout(() => setFeedbackMsg(null), 10000);
+      } else {
+        setFeedbackMsg({ type: 'error', text: `导入失败：${res.message || res.error || '未知错误'}` });
+      }
+    } catch (error) {
+      console.error('Import blacklist failed:', error);
+      setFeedbackMsg({ type: 'error', text: '导入失败，请检查文件格式' });
+    } finally {
+      setLoading(false);
+      if (importFileRef.current) importFileRef.current.value = '';
     }
   };
 
@@ -126,13 +165,30 @@ export default function Settings() {
                   <Ban className="text-red-400" size={20} />
                   黑名单管理
                 </h3>
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="btn-neon flex items-center gap-2 text-sm py-2"
-                >
-                  <Plus size={16} />
-                  添加黑名单
-                </button>
+                <div className="flex gap-2">
+                  <input
+                    type="file"
+                    ref={importFileRef}
+                    onChange={handleImportBlacklist}
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => importFileRef.current?.click()}
+                    disabled={loading}
+                    className="btn-outline flex items-center gap-2 text-sm py-2 disabled:opacity-50"
+                  >
+                    <Upload size={16} />
+                    {loading ? '导入中...' : '导入黑名单'}
+                  </button>
+                  <button
+                    onClick={() => setShowAddModal(true)}
+                    className="btn-neon flex items-center gap-2 text-sm py-2"
+                  >
+                    <Plus size={16} />
+                    添加黑名单
+                  </button>
+                </div>
               </div>
 
               <div className="mb-4">

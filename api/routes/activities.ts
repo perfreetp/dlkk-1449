@@ -366,6 +366,41 @@ router.delete('/:id/candidates/:candidateId', requireAuth, async (req, res) => {
   }
 });
 
+router.put('/:id/candidates/:candidateId', requireAuth, async (req, res) => {
+  try {
+    const { id, candidateId } = req.params;
+    const { nickname, groupId } = req.body;
+    await db.read();
+    const candidate = db.data.candidates.find(c => c.id === candidateId && c.activityId === id);
+    if (!candidate) {
+      return sendError(res, '候选者不存在', 404);
+    }
+    if (nickname !== undefined) {
+      candidate.nickname = String(nickname).trim() || undefined;
+    }
+    if (groupId !== undefined) {
+      candidate.groupId = groupId || undefined;
+    }
+    if (req.session.user) {
+      db.data.operationLogs.push({
+        id: generateId(),
+        activityId: id,
+        operatorId: req.session.user.id,
+        operatorName: req.session.user.username,
+        action: `更新候选者`,
+        actionType: 'candidate_add',
+        details: `编号 ${candidate.number} 更新${groupId !== undefined ? `，分组=${groupId || '无'}` : ''}${nickname !== undefined ? `，昵称=${candidate.nickname || '无'}` : ''}`,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+    }
+    await db.write();
+    sendSuccess(res, candidate, '更新成功');
+  } catch (error) {
+    sendError(res, '更新候选者失败', 500);
+  }
+});
+
 router.post('/:id/signup', async (req, res) => {
   try {
     const { id } = req.params;

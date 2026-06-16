@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useStore } from '@/store/useStore';
-import type { Winner, Danmaku } from '../../shared/types';
+import type { Winner, Danmaku, DrawRound, Candidate } from '../../shared/types';
 
 interface DrawCompleteEvent {
   roundId: string;
@@ -14,14 +14,22 @@ interface DrawRedrawEvent {
   newWinners: Winner[];
 }
 
+interface DrawInvalidatedEvent {
+  winnerId: string;
+  roundId: string;
+  reason?: string;
+}
+
 interface RoundUpdateEvent {
   roundId: string;
-  remaining: number;
+  remaining?: number;
+  status?: DrawRound['status'];
+  validWinners?: number;
 }
 
 export function useSocket(activityId: string | null) {
   const socketRef = useRef<Socket | null>(null);
-  const { addWinner, removeWinner, addDanmaku, approveDanmaku, setDrawState } = useStore();
+  const { addWinner, removeWinner, addDanmaku, approveDanmaku, setDrawState, invalidateWinner, updateRound, addCandidate } = useStore();
 
   const connect = useCallback(() => {
     if (!activityId) return;
@@ -56,12 +64,25 @@ export function useSocket(activityId: string | null) {
       });
     });
 
+    socket.on('draw:invalidated', (data: DrawInvalidatedEvent) => {
+      console.log('Draw invalidated:', data);
+      invalidateWinner(data.winnerId, data.reason);
+    });
+
     socket.on('draw:update', (data: { number: string }) => {
       setDrawState({ currentNumber: data.number });
     });
 
     socket.on('round:update', (data: RoundUpdateEvent) => {
       console.log('Round update:', data);
+      const patch: Partial<DrawRound> = {};
+      if (data.status) patch.status = data.status;
+      updateRound(data.roundId, patch);
+    });
+
+    socket.on('candidate:new', (data: Candidate) => {
+      console.log('New candidate:', data);
+      addCandidate(data);
     });
 
     socket.on('danmaku:new', (data: Danmaku) => {
@@ -79,7 +100,7 @@ export function useSocket(activityId: string | null) {
     return () => {
       socket.disconnect();
     };
-  }, [activityId, addWinner, removeWinner, addDanmaku, approveDanmaku, setDrawState]);
+  }, [activityId, addWinner, removeWinner, addDanmaku, approveDanmaku, setDrawState, invalidateWinner, updateRound, addCandidate]);
 
   useEffect(() => {
     const cleanup = connect();

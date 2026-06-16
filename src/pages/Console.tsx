@@ -2,17 +2,18 @@ import { useState, useEffect } from 'react';
 import { Layout } from '@/components/Layout';
 import { CandidateList } from '@/components/CandidateList';
 import { RoundSetup } from '@/components/RoundSetup';
+import { GroupManager } from '@/components/GroupManager';
 import { DrawControl } from '@/components/DrawControl';
 import { DanmakuPanel } from '@/components/DanmakuPanel';
 import { useStore } from '@/store/useStore';
-import { api } from '@/utils/api';
 import { Play, Square, Users, Trophy, Clock, AlertCircle } from 'lucide-react';
 import { useSocket } from '@/hooks/useSocket';
+import { api } from '@/utils/api';
 
 export default function Console() {
-  const { currentActivity, candidates, rounds, winners, setCandidates, setRounds, setWinners, setDanmaku } = useStore();
+  const { currentActivity, candidates, rounds, winners, groups, setCandidates, setRounds, setWinners, setDanmaku, setGroups } = useStore();
   const [currentRoundId, setCurrentRoundId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'draw' | 'candidates' | 'danmaku'>('draw');
+  const [activeTab, setActiveTab] = useState<'draw' | 'candidates' | 'groups' | 'danmaku'>('draw');
   const [loading, setLoading] = useState(false);
 
   useSocket(currentActivity?.id);
@@ -27,17 +28,19 @@ export default function Console() {
     if (!currentActivity) return;
     
     try {
-      const [candidatesRes, roundsRes, winnersRes, danmakuRes] = await Promise.all([
+      const [candidatesRes, roundsRes, winnersRes, danmakuRes, groupsRes] = await Promise.all([
         api.candidates.list(currentActivity.id),
         api.rounds.list(currentActivity.id),
         api.winners.list(currentActivity.id),
         api.danmaku.list(currentActivity.id),
+        api.groups.list(currentActivity.id),
       ]);
 
       if (candidatesRes.success) setCandidates(candidatesRes.data || []);
       if (roundsRes.success) setRounds(roundsRes.data || []);
       if (winnersRes.success) setWinners(winnersRes.data || []);
       if (danmakuRes.success) setDanmaku(danmakuRes.data || []);
+      if (groupsRes.success) setGroups(groupsRes.data || []);
     } catch (error) {
       console.error('Load data failed:', error);
     }
@@ -193,6 +196,7 @@ export default function Console() {
           {[
             { key: 'draw', label: '抽签控制' },
             { key: 'candidates', label: '候选名单' },
+            { key: 'groups', label: '分组管理' },
             { key: 'danmaku', label: '弹幕管理' },
           ].map((tab) => (
             <button
@@ -234,6 +238,15 @@ export default function Console() {
             {activeTab === 'candidates' && (
               <CandidateList
                 activityId={currentActivity.id}
+                candidates={candidates}
+                groups={groups}
+                onUpdate={loadData}
+              />
+            )}
+            {activeTab === 'groups' && (
+              <GroupManager
+                activityId={currentActivity.id}
+                groups={groups}
                 candidates={candidates}
                 onUpdate={loadData}
               />

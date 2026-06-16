@@ -1,20 +1,21 @@
 import { useState, useRef } from 'react';
-import { Upload, Plus, Search, Trash2, UserPlus, X, AlertTriangle } from 'lucide-react';
+import { Upload, Plus, Search, Trash2, UserPlus, X, AlertTriangle, Users } from 'lucide-react';
 import { api } from '@/utils/api';
-import type { Candidate } from '../../shared/types';
+import type { Candidate, Group } from '../../shared/types';
 
 interface CandidateListProps {
   activityId: string;
   candidates: Candidate[];
+  groups?: Group[];
   onUpdate: () => void;
 }
 
-export function CandidateList({ activityId, candidates, onUpdate }: CandidateListProps) {
+export function CandidateList({ activityId, candidates, groups = [], onUpdate }: CandidateListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCandidate, setNewCandidate] = useState({ number: '', nickname: '' });
   const [loading, setLoading] = useState(false);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importMsg, setImportMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredCandidates = candidates.filter(
@@ -47,7 +48,7 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
     const validExts = ['.xlsx', '.xls', '.csv'];
     const fileName = file.name.toLowerCase();
     if (!validExts.some(ext => fileName.endsWith(ext))) {
-      setImportMsg('只支持 .xlsx、.xls、.csv 格式文件');
+      setImportMsg({ text: '只支持 .xlsx、.xls、.csv 格式文件', type: 'error' });
       setTimeout(() => setImportMsg(null), 4000);
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
@@ -65,19 +66,19 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
         const parts: string[] = [];
         parts.push(`成功导入 ${imported} 人`);
         if (skippedDuplicate > 0) parts.push(`跳过重复 ${skippedDuplicate} 个`);
-        if (skippedBlacklist > 0) parts.push(`黑名单 ${skippedBlacklist} 个`);
+        if (skippedBlacklist > 0) parts.push(`黑名单 ${skippedBlacklist} 个（不会参与抽取）`);
         if (skippedEmpty > 0) parts.push(`空行 ${skippedEmpty} 个`);
-        setImportMsg(parts.join('，'));
+        setImportMsg({ text: parts.join('，'), type: 'success' });
         onUpdate();
       } else {
-        setImportMsg(`导入失败：${response.message || response.error}`);
+        setImportMsg({ text: `导入失败：${response.message || response.error || '未知错误'}`, type: 'error' });
       }
     } catch (error) {
       console.error('Failed to import candidates:', error);
-      setImportMsg('导入失败，请检查文件格式');
+      setImportMsg({ text: '导入失败，请检查文件格式', type: 'error' });
     } finally {
       setLoading(false);
-      setTimeout(() => setImportMsg(null), 5000);
+      setTimeout(() => setImportMsg(null), 6000);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -93,6 +94,19 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
       console.error('Failed to delete candidate:', error);
     }
   };
+
+  const handleChangeGroup = async (candidateId: string, groupId: string) => {
+    try {
+      const res = await api.candidates.update(activityId, candidateId, { groupId: groupId || undefined });
+      if (res.success) {
+        onUpdate();
+      }
+    } catch (error) {
+      console.error('Failed to change group:', error);
+    }
+  };
+
+  const getGroupInfo = (gid?: string) => gid ? groups.find(g => g.id === gid) : null;
 
   const blacklistedCount = candidates.filter(c => c.isBlacklisted).length;
 
@@ -138,11 +152,11 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
 
     {importMsg && (
       <div className={`mb-4 px-4 py-3 rounded-xl text-sm border ${
-        importMsg.includes('成功') || importMsg.includes('导入') 
+        importMsg.type === 'success'
           ? 'bg-green-500/10 border-green-500/30 text-green-300' 
           : 'bg-red-500/10 border-red-500/30 text-red-300'
       }`}>
-        {importMsg}
+        {importMsg.text}
       </div>
     )}
 
@@ -183,20 +197,42 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
                 }`}>
                   {candidate.number.charAt(0)}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-white">{candidate.number}</span>
                     {candidate.isBlacklisted && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">
                         <AlertTriangle size={10} />
-                        黑名单
+                        黑名单（不会参与抽取）
                       </span>
                     )}
+                    {(() => {
+                      const g = getGroupInfo(candidate.groupId);
+                      return g ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full border" style={{ backgroundColor: `${g.color}22`, borderColor: `${g.color}55`, color: g.color }}>
+                          <Users size={10} />
+                          {g.name}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   {candidate.nickname && (
                     <p className="text-sm text-gray-400">{candidate.nickname}</p>
                   )}
                 </div>
+                {groups.length > 0 && (
+                  <select
+                    value={candidate.groupId || ''}
+                    onChange={(e) => handleChangeGroup(candidate.id, e.target.value)}
+                    className="bg-dark-300 text-xs text-gray-300 rounded-lg px-2 py-1.5 border border-white/5 focus:outline-none focus:border-primary-500"
+                    title="设置分组"
+                  >
+                    <option value="">未分组</option>
+                    {groups.map(g => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
               <button
                 onClick={() => handleDelete(candidate.id)}

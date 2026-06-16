@@ -93,6 +93,11 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    update: (activityId: string, candidateId: string, data: { nickname?: string; groupId?: string }) =>
+      request<Candidate>(`/activities/${activityId}/candidates/${candidateId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
     delete: (activityId: string, candidateId: string) =>
       request(`/activities/${activityId}/candidates/${candidateId}`, {
         method: 'DELETE',
@@ -163,6 +168,12 @@ export const api = {
       request<{ blacklist: Blacklist; invalidatedWinnerCount: number; affectedWinners: Array<{ winnerId: string; roundId: string; activityId: string }>; message?: string }>('/blacklist', {
         method: 'POST',
         body: JSON.stringify(data),
+      }),
+    import: (formData: FormData) =>
+      request<{ imported: number; skippedDuplicate: number; skippedEmpty: number; invalidatedWinnerCount: number }>('/blacklist/import', {
+        method: 'POST',
+        body: formData,
+        headers: {},
       }),
     remove: (id: string) =>
       request(`/blacklist/${id}`, {

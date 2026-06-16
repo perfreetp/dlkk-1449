@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Layout } from '@/components/Layout';
 import { useStore } from '@/store/useStore';
 import { api } from '@/utils/api';
+import { useSocket } from '@/hooks/useSocket';
 import { formatDate, formatTime, exportToCSV } from '@/utils/format';
 import { Trophy, Search, Download, ListOrdered, History, CheckCircle, XCircle, Package, Clock, Filter } from 'lucide-react';
 import type { Winner, DrawRound, Activity } from '../../shared/types';
@@ -13,6 +14,8 @@ export default function Results() {
   const [searchResult, setSearchResult] = useState<{ found: boolean; winner?: Winner } | null>(null);
   const [activeTab, setActiveTab] = useState<'winners' | 'order' | 'query' | 'logs'>('winners');
   const [filterRound, setFilterRound] = useState<string | null>(null);
+
+  useSocket(selectedActivityId);
 
   useEffect(() => {
     loadData();

@@ -286,24 +286,41 @@ export function RoundSetup({ activityId, rounds, winners, currentRoundId, onUpda
                   </button>
                 </div>
               </div>
-              {groups.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-300">
                     抽取分组（可选）
                   </label>
-                  <select
-                    value={newRound.groupId}
-                    onChange={(e) => setNewRound({ ...newRound, groupId: e.target.value })}
-                    className="input-neon !text-white"
-                  >
-                    <option value="">全部候选者</option>
-                    {groups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">选择分组后，该轮次仅从该分组成员中抽取</p>
+                  {groups.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => window.alert('请到控制台「分组管理」Tab 中创建分组后再选择')}
+                      className="text-xs text-primary-400 hover:text-primary-300"
+                    >
+                      + 创建分组
+                    </button>
+                  )}
                 </div>
-              )}
+                {groups.length > 0 ? (
+                  <>
+                    <select
+                      value={newRound.groupId}
+                      onChange={(e) => setNewRound({ ...newRound, groupId: e.target.value })}
+                      className="input-neon !text-white"
+                    >
+                      <option value="">全部候选者</option>
+                      {groups.map(g => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">选择分组后，该轮次仅从该分组成员中抽取</p>
+                  </>
+                ) : (
+                  <div className="p-3 rounded-xl bg-dark-300/50 border border-dashed border-white/10 text-sm text-gray-400">
+                    还没有分组，请到「分组管理」Tab 中创建分组。不分组则默认从所有候选者中抽取。
+                  </div>
+                )}
+              </div>
               <div className="flex items-center justify-between p-4 rounded-xl bg-dark-300/50">
                 <div>
                   <p className="text-white font-medium">允许重复中奖</p>
@@ -413,24 +430,41 @@ export function RoundSetup({ activityId, rounds, winners, currentRoundId, onUpda
                   </button>
                 </div>
               </div>
-              {groups.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-300">
                     抽取分组（可选）
                   </label>
-                  <select
-                    value={editingRound.groupId || ''}
-                    onChange={(e) => setEditingRound({ ...editingRound, groupId: e.target.value || undefined })}
-                    className="input-neon !text-white"
-                  >
-                    <option value="">全部候选者</option>
-                    {groups.map(g => (
-                      <option key={g.id} value={g.id}>{g.name}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">选择分组后，该轮次仅从该分组成员中抽取</p>
+                  {groups.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => window.alert('请到控制台「分组管理」Tab 中创建分组后再选择')}
+                      className="text-xs text-primary-400 hover:text-primary-300"
+                    >
+                      + 创建分组
+                    </button>
+                  )}
                 </div>
-              )}
+                {groups.length > 0 ? (
+                  <>
+                    <select
+                      value={editingRound.groupId || ''}
+                      onChange={(e) => setEditingRound({ ...editingRound, groupId: e.target.value || undefined })}
+                      className="input-neon !text-white"
+                    >
+                      <option value="">全部候选者</option>
+                      {groups.map(g => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">选择分组后，该轮次仅从该分组成员中抽取</p>
+                  </>
+                ) : (
+                  <div className="p-3 rounded-xl bg-dark-300/50 border border-dashed border-white/10 text-sm text-gray-400">
+                    还没有分组，请到「分组管理」Tab 中创建分组。不分组则默认从所有候选者中抽取。
+                  </div>
+                )}
+              </div>
               <div className="flex items-center justify-between p-4 rounded-xl bg-dark-300/50">
                 <div>
                   <p className="text-white font-medium">允许重复中奖</p>

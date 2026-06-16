@@ -46,6 +46,9 @@ interface AppState {
   setDrawState: (state: Partial<DrawState>) => void;
   setShowHostTip: (show: boolean) => void;
   resetDrawState: () => void;
+  invalidateWinner: (winnerId: string, reason?: string) => void;
+  updateRound: (roundId: string, patch: Partial<DrawRound>) => void;
+  addCandidate: (candidate: Candidate) => void;
   logout: () => void;
 }
 
@@ -110,6 +113,25 @@ export const useStore = create<AppState>()(
         })),
       setShowHostTip: (show) => set({ showHostTip: show }),
       resetDrawState: () => set({ drawState: initialDrawState }),
+      invalidateWinner: (winnerId, reason) =>
+        set((state) => ({
+          winners: state.winners.map((w) =>
+            w.id === winnerId ? { ...w, isInvalid: true, invalidReason: reason || w.invalidReason } : w
+          ),
+        })),
+      updateRound: (roundId, patch) =>
+        set((state) => ({
+          rounds: state.rounds.map((r) =>
+            r.id === roundId ? { ...r, ...patch } : r
+          ),
+        })),
+      addCandidate: (candidate) =>
+        set((state) => {
+          if (state.candidates.some(c => c.id === candidate.id)) {
+            return { candidates: state.candidates };
+          }
+          return { candidates: [...state.candidates, candidate] };
+        }),
       logout: () =>
         set({
           currentUser: null,
