@@ -379,7 +379,7 @@ router.put('/:id/candidates/:candidateId', requireAuth, async (req, res) => {
       candidate.nickname = String(nickname).trim() || undefined;
     }
     if (groupId !== undefined) {
-      candidate.groupId = groupId || undefined;
+      candidate.groupId = String(groupId).trim() || undefined;
     }
     if (req.session.user) {
       db.data.operationLogs.push({
@@ -389,7 +389,7 @@ router.put('/:id/candidates/:candidateId', requireAuth, async (req, res) => {
         operatorName: req.session.user.username,
         action: `更新候选者`,
         actionType: 'candidate_add',
-        details: `编号 ${candidate.number} 更新${groupId !== undefined ? `，分组=${groupId || '无'}` : ''}${nickname !== undefined ? `，昵称=${candidate.nickname || '无'}` : ''}`,
+        details: `编号 ${candidate.number} 更新${groupId !== undefined ? `，分组=${candidate.groupId || '未分组'}` : ''}${nickname !== undefined ? `，昵称=${candidate.nickname || '无'}` : ''}`,
         timestamp: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       });

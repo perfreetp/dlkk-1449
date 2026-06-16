@@ -114,7 +114,9 @@ export function GroupManager({ activityId, groups, candidates, rounds = [], onUp
 
   const handleMoveCandidate = async (candidateId: string, targetGroupId: string | undefined) => {
     try {
-      const res = await api.candidates.update(activityId, candidateId, { groupId: targetGroupId });
+      const res = await api.candidates.update(activityId, candidateId, {
+        groupId: targetGroupId !== undefined ? targetGroupId : ''
+      });
       if (res.success) {
         onUpdate();
       } else {
@@ -138,7 +140,7 @@ export function GroupManager({ activityId, groups, candidates, rounds = [], onUp
     const ids = Array.from(selectedIds);
     for (const id of ids) {
       try {
-        const res = await api.candidates.update(activityId, id, { groupId: batchTargetGroup || undefined });
+        const res = await api.candidates.update(activityId, id, { groupId: batchTargetGroup });
         if (res.success) success++; else failed++;
       } catch {
         failed++;

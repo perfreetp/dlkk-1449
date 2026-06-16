@@ -4,24 +4,40 @@ import { useStore } from '@/store/useStore';
 import { api } from '@/utils/api';
 import { useSocket } from '@/hooks/useSocket';
 import { formatDate, formatTime, exportToCSV } from '@/utils/format';
-import { Trophy, Search, Download, ListOrdered, History, CheckCircle, XCircle, Package, Clock, Filter, Ban, AlertTriangle, TrendingUp, Users2 } from 'lucide-react';
-import type { Winner, DrawRound, Activity, Candidate } from '../../shared/types';
+import { Trophy, Search, Download, ListOrdered, History, CheckCircle, XCircle, Package, Clock, Filter, Ban, AlertTriangle, TrendingUp, Users2, UserPlus, ArrowRightLeft, RefreshCw, FileDown, FileWarning, X } from 'lucide-react';
+import type { Winner, DrawRound, Activity, Candidate, OperationLog } from '../../shared/types';
 
 type SearchStatus = 'valid_winner' | 'invalid_winner' | 'not_won' | 'not_found' | 'multi_matches';
+
+interface TimelineEvent {
+  id: string;
+  type: 'signup' | 'group_change' | 'win' | 'replenishment' | 'invalidated' | 'redraw' | 'blacklist_add' | 'blacklist_remove' | 'candidate_delete';
+  time: string;
+  title: string;
+  description?: string;
+  icon: React.ComponentType<any>;
+  tone: 'green' | 'gold' | 'red' | 'blue' | 'purple' | 'gray';
+  roundName?: string;
+  drawOrder?: number;
+  isReplenishment?: boolean;
+  invalidReason?: string;
+}
 
 interface SearchResult {
   status: SearchStatus;
   matches: Winner[];
   candidate?: Candidate;
+  timeline: TimelineEvent[];
 }
 
 export default function Results() {
-  const { activities, rounds, winners, candidates, setActivities, setRounds, setWinners, operationLogs, setOperationLogs, setCandidates } = useStore();
+  const { activities, rounds, winners, candidates, groups, setActivities, setRounds, setWinners, operationLogs, setOperationLogs, setCandidates, setGroups } = useStore();
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [activeTab, setActiveTab] = useState<'winners' | 'order' | 'query' | 'logs'>('winners');
   const [filterRound, setFilterRound] = useState<string | null>(null);
+  const [exportMode, setExportMode] = useState<'valid' | 'all'>('valid');
 
   useSocket(selectedActivityId);
 
@@ -92,12 +108,15 @@ export default function Results() {
       (c.nickname && c.nickname.toLowerCase() === query)
     );
 
+    const targetNumber = matchCandidate?.number || matches[0]?.candidate?.number || query;
+    const timeline = buildTimeline(targetNumber, matchCandidate, matches, operationLogs, rounds);
+
     if (matches.length === 0 && !matchCandidate) {
-      setSearchResult({ status: 'not_found', matches: [] });
+      setSearchResult({ status: 'not_found', matches: [], timeline: [] });
       return;
     }
     if (matches.length === 0 && matchCandidate) {
-      setSearchResult({ status: 'not_won', matches: [], candidate: matchCandidate });
+      setSearchResult({ status: 'not_won', matches: [], candidate: matchCandidate, timeline });
       return;
     }
     const hasValid = matches.some(m => !m.isInvalid);
@@ -107,30 +126,173 @@ export default function Results() {
         status: !m.isInvalid ? 'valid_winner' : 'invalid_winner',
         matches,
         candidate: m.candidate || matchCandidate,
+        timeline,
       });
       return;
     }
     if (hasValid && matches.filter(m => !m.isInvalid).length === 1) {
       const m = matches.find(m => !m.isInvalid)!;
-      setSearchResult({ status: 'valid_winner', matches, candidate: m.candidate || matchCandidate });
+      setSearchResult({ status: 'valid_winner', matches, candidate: m.candidate || matchCandidate, timeline });
       return;
     }
-    setSearchResult({ status: 'multi_matches', matches, candidate: matchCandidate });
+    setSearchResult({ status: 'multi_matches', matches, candidate: matchCandidate, timeline });
   };
 
+  function buildTimeline(
+    number: string,
+    candidate: Candidate | undefined,
+    matches: Winner[],
+    logs: OperationLog[],
+    rounds: DrawRound[]
+  ): TimelineEvent[] {
+    const events: TimelineEvent[] = [];
+
+    if (candidate) {
+      events.push({
+        id: `signup-${candidate.id}`,
+        type: 'signup',
+        time: candidate.createdAt,
+        title: '报名成功',
+        description: candidate.nickname ? `昵称「${candidate.nickname}」` : undefined,
+        icon: UserPlus,
+        tone: 'green',
+      });
+      if (candidate.groupId) {
+        const g = groups.find(grp => grp.id === candidate.groupId);
+        events.push({
+          id: `group-init-${candidate.id}`,
+          type: 'group_change',
+          time: candidate.createdAt,
+          title: `进入分组「${g?.name || candidate.groupId}」`,
+          icon: Users2,
+          tone: 'blue',
+        });
+      }
+      if (candidate.isBlacklisted) {
+        events.push({
+          id: `blacklist-curr-${candidate.id}`,
+          type: 'blacklist_add',
+          time: candidate.createdAt,
+          title: '已在黑名单中',
+          description: '该编号不会参与任何抽取',
+          icon: Ban,
+          tone: 'red',
+        });
+      }
+    }
+
+    const groupRe = /分组=(.+)/;
+    logs.forEach(log => {
+      if (log.actionType === 'candidate_add' && log.details.includes(number)) {
+        const m = log.details.match(groupRe);
+        if (m) {
+          const groupName = m[1];
+          events.push({
+            id: `group-${log.id}`,
+            type: 'group_change',
+            time: log.timestamp,
+            title: groupName === '未分组' ? '移出分组' : `分组变更为「${groupName}」`,
+            icon: ArrowRightLeft,
+            tone: 'blue',
+          });
+        }
+      }
+      if (log.actionType === 'candidate_delete' && log.details.includes(number)) {
+        events.push({
+          id: `delete-${log.id}`,
+          type: 'candidate_delete',
+          time: log.timestamp,
+          title: '从候选池删除',
+          icon: X,
+          tone: 'gray',
+        });
+      }
+      if (log.actionType === 'blacklist_add' && log.details.includes(number)) {
+        events.push({
+          id: `bl-add-${log.id}`,
+          type: 'blacklist_add',
+          time: log.timestamp,
+          title: '加入黑名单',
+          description: log.details,
+          icon: Ban,
+          tone: 'red',
+        });
+      }
+      if (log.actionType === 'draw_redraw' && log.details.includes(number)) {
+        events.push({
+          id: `redraw-${log.id}`,
+          type: 'redraw',
+          time: log.timestamp,
+          title: '异常重抽补位',
+          description: log.details,
+          icon: RefreshCw,
+          tone: 'purple',
+        });
+      }
+    });
+
+    matches.forEach(w => {
+      const round = rounds.find(r => r.id === w.roundId);
+      if (w.isReplenishment) {
+        events.push({
+          id: `win-${w.id}-rep`,
+          type: 'replenishment',
+          time: w.createdAt,
+          title: `补位中奖 · 第 ${round?.roundNumber} 轮 ${round?.name || ''}`,
+          description: `抽取顺序 #${w.drawOrder}`,
+          icon: TrendingUp,
+          tone: 'gold',
+          roundName: round?.name,
+          drawOrder: w.drawOrder,
+          isReplenishment: true,
+        });
+      } else {
+        events.push({
+          id: `win-${w.id}`,
+          type: 'win',
+          time: w.createdAt,
+          title: `抽中 · 第 ${round?.roundNumber} 轮 ${round?.name || ''}`,
+          description: `抽取顺序 #${w.drawOrder}`,
+          icon: Trophy,
+          tone: 'gold',
+          roundName: round?.name,
+          drawOrder: w.drawOrder,
+        });
+      }
+      if (w.isInvalid) {
+        events.push({
+          id: `invalid-${w.id}`,
+          type: 'invalidated',
+          time: w.createdAt,
+          title: '中奖记录失效',
+          description: w.invalidReason || '已移除',
+          icon: FileWarning,
+          tone: 'red',
+          invalidReason: w.invalidReason,
+        });
+      }
+    });
+
+    return events.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  }
+
   const handleExport = () => {
-    const validWinners = winners.filter(w => !w.isInvalid);
-    const exportData = validWinners.map(w => ({
+    const exportWinners = exportMode === 'valid' 
+      ? winners.filter(w => !w.isInvalid) 
+      : winners;
+    const exportData = exportWinners.map(w => ({
       '中奖编号': w.candidate?.number || '',
       '昵称': w.candidate?.nickname || '',
       '所属轮次': rounds.find(r => r.id === w.roundId)?.name || '',
       '中奖顺序': w.drawOrder || '',
       '是否补位': w.isReplenishment ? '是' : '否',
+      '状态': w.isInvalid ? '已失效' : '有效',
+      '失效原因': w.invalidReason || '',
       '中奖时间': formatDate(w.createdAt),
     }));
-    
     const activity = activities.find(a => a.id === selectedActivityId);
-    exportToCSV(exportData, `${activity?.name || '中奖名单'}_${new Date().toLocaleDateString()}`);
+    const filename = `${activity?.name || '中奖名单'}_${exportMode === 'valid' ? '仅有效' : '含失效明细'}_${new Date().toLocaleDateString()}`;
+    exportToCSV(exportData, filename);
   };
 
   const selectedActivity = activities.find(a => a.id === selectedActivityId);
@@ -176,7 +338,26 @@ export default function Results() {
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
-              {validWinners.length > 0 && (
+              {activeTab === 'winners' && validWinners.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={exportMode}
+                    onChange={(e) => setExportMode(e.target.value as typeof exportMode)}
+                    className="bg-dark-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-primary-500"
+                  >
+                    <option value="valid">仅导出有效名单</option>
+                    <option value="all">含失效明细</option>
+                  </select>
+                  <button
+                    onClick={handleExport}
+                    className="btn-outline flex items-center gap-2 py-2.5"
+                  >
+                    <Download size={18} />
+                    导出名单
+                  </button>
+                </div>
+              )}
+              {activeTab !== 'winners' && validWinners.length > 0 && (
                 <button
                   onClick={handleExport}
                   className="btn-outline flex items-center gap-2 py-2.5"
@@ -655,6 +836,66 @@ export default function Results() {
                           </div>
                         </>
                       ) : null}
+
+                      {searchResult.timeline.length > 0 && (
+                        <div className="mt-8 pt-6 border-t border-white/10">
+                          <h4 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                            <Clock size={16} className="text-gray-400" />
+                            完整时间线
+                          </h4>
+                          <div className="space-y-0">
+                            {searchResult.timeline.map((event, idx) => {
+                              const Icon = event.icon;
+                              const toneMap = {
+                                green: { bg: 'bg-green-500/20', border: 'border-green-500/30', text: 'text-green-300', dot: 'bg-green-500' },
+                                gold: { bg: 'bg-[#FFD700]/20', border: 'border-[#FFD700]/30', text: 'text-[#FFD700]', dot: 'bg-[#FFD700]' },
+                                red: { bg: 'bg-red-500/20', border: 'border-red-500/30', text: 'text-red-300', dot: 'bg-red-500' },
+                                blue: { bg: 'bg-blue-500/20', border: 'border-blue-500/30', text: 'text-blue-300', dot: 'bg-blue-500' },
+                                purple: { bg: 'bg-purple-500/20', border: 'border-purple-500/30', text: 'text-purple-300', dot: 'bg-purple-500' },
+                                gray: { bg: 'bg-gray-500/20', border: 'border-gray-500/30', text: 'text-gray-300', dot: 'bg-gray-500' },
+                              } as const;
+                              const t = toneMap[event.tone];
+                              const isLast = idx === searchResult.timeline.length - 1;
+
+                              return (
+                                <div key={event.id} className="flex gap-3 relative">
+                                  <div className="flex flex-col items-center">
+                                    <div className={`w-8 h-8 rounded-full ${t.bg} ${t.border} border flex items-center justify-center flex-shrink-0 z-10`}>
+                                      <Icon size={14} className={t.text} />
+                                    </div>
+                                    {!isLast && (
+                                      <div className={`w-0.5 flex-1 ${t.dot} opacity-30`} />
+                                    )}
+                                  </div>
+                                  <div className="pb-4 pt-0.5 flex-1">
+                                    <div className="flex items-start justify-between gap-4">
+                                      <div className="flex-1">
+                                        <div className={`font-medium ${t.text}`}>
+                                          {event.title}
+                                        </div>
+                                        {event.description && (
+                                          <div className="text-sm text-gray-400 mt-0.5">
+                                            {event.description}
+                                          </div>
+                                        )}
+                                        {event.invalidReason && (
+                                          <div className="text-sm text-red-400 mt-0.5">
+                                            原因：{event.invalidReason}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-gray-500 whitespace-nowrap ml-2">
+                                        {formatDate(event.time)}
+                                        <div className="text-right">{formatTime(event.time)}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

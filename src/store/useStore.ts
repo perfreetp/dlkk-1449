@@ -72,6 +72,8 @@ export const useStore = create<AppState>()(
       blacklist: [],
       groups: [],
       operationLogs: [],
+      announcements: [],
+      pendingAnnouncements: [],
       drawState: initialDrawState,
       showHostTip: true,
 

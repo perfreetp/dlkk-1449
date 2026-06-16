@@ -97,7 +97,7 @@ export function CandidateList({ activityId, candidates, groups = [], onUpdate }:
 
   const handleChangeGroup = async (candidateId: string, groupId: string) => {
     try {
-      const res = await api.candidates.update(activityId, candidateId, { groupId: groupId || undefined });
+      const res = await api.candidates.update(activityId, candidateId, { groupId });
       if (res.success) {
         onUpdate();
       }
