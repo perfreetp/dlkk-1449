@@ -11,7 +11,8 @@ export async function executeDraw(
   activityId: string,
   roundId: string,
   operatorId: string,
-  operatorName: string
+  operatorName: string,
+  drawCountOverride?: number
 ): Promise<DrawResult> {
   await db.read();
 
@@ -32,32 +33,43 @@ export async function executeDraw(
     c => c.activityId === activityId && !c.isBlacklisted
   );
 
+  if (round.groupId) {
+    candidates = candidates.filter(c => c.groupId === round.groupId);
+  }
+
+  const existingValidWinners = db.data.winners.filter(w => w.roundId === roundId && !w.isInvalid);
+  const existingWinnerIds = existingValidWinners.map(w => w.candidateId);
+
   if (!round.allowRepeat) {
-    const existingWinnerIds = db.data.winners
-      .filter(w => w.roundId === roundId && !w.isInvalid)
-      .map(w => w.candidateId);
     candidates = candidates.filter(c => !existingWinnerIds.includes(c.id));
   }
 
   if (candidates.length === 0) {
-    throw new Error('没有可抽取的候选者');
+    throw new Error(round.groupId ? '该分组没有可抽取的候选者' : '没有可抽取的候选者');
   }
 
-  const remainingCount = round.drawCount - db.data.winners.filter(w => w.roundId === roundId && !w.isInvalid).length;
-  const drawCount = Math.min(remainingCount, candidates.length);
+  const remaining = round.drawCount - existingValidWinners.length;
+  if (remaining <= 0) {
+    throw new Error('该轮次已完成抽取');
+  }
 
-  const existingWinnerIds = db.data.winners
-    .filter(w => w.roundId === roundId && !w.isInvalid)
-    .map(w => w.candidateId);
+  let actualDrawCount: number;
+  if (drawCountOverride !== undefined && drawCountOverride > 0) {
+    actualDrawCount = Math.min(drawCountOverride, remaining, candidates.length);
+  } else if (round.mode === 'single') {
+    actualDrawCount = Math.min(1, remaining, candidates.length);
+  } else {
+    actualDrawCount = Math.min(remaining, candidates.length);
+  }
 
   const drawnCandidates = drawRandom<Candidate>(
     candidates,
-    drawCount,
+    actualDrawCount,
     round.allowRepeat ? [] : existingWinnerIds,
     (c) => c.id
   );
 
-  const currentDrawOrder = db.data.winners.filter(w => w.roundId === roundId && !w.isInvalid).length;
+  const currentDrawOrder = existingValidWinners.length;
 
   const winners: Winner[] = drawnCandidates.map((candidate, idx) => ({
     id: generateId(),
@@ -77,9 +89,9 @@ export async function executeDraw(
     activityId,
     operatorId,
     operatorName,
-    action: '抽取',
+    action: round.mode === 'single' ? '单抽' : '抽取',
     actionType: 'draw',
-    details: `抽中编号 ${candidate.number} ${candidate.nickname ? `(${candidate.nickname})` : ''}`,
+    details: `抽中编号 ${candidate.number} ${candidate.nickname ? `(${candidate.nickname})` : ''}${round.groupId ? ` [分组抽取]` : ''}`,
     timestamp: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   }));
@@ -125,6 +137,10 @@ export async function executeRedraw(
     c => c.activityId === activityId && !c.isBlacklisted
   );
 
+  if (round.groupId) {
+    candidates = candidates.filter(c => c.groupId === round.groupId);
+  }
+
   const existingWinnerIds = db.data.winners
     .filter(w => w.roundId === roundId && !w.isInvalid)
     .map(w => w.candidateId);
@@ -134,7 +150,7 @@ export async function executeRedraw(
   }
 
   if (candidates.length === 0) {
-    throw new Error('没有可补位的候选者');
+    throw new Error(round.groupId ? '该分组没有可补位的候选者' : '没有可补位的候选者');
   }
 
   const drawnCandidates = drawRandom<Candidate>(
@@ -189,11 +205,16 @@ export async function executeRedraw(
 export function getAvailableCandidates(
   activityId: string,
   roundId: string,
-  allowRepeat: boolean
+  allowRepeat: boolean,
+  groupId?: string
 ): Candidate[] {
-  const candidates = db.data.candidates.filter(
+  let candidates = db.data.candidates.filter(
     c => c.activityId === activityId && !c.isBlacklisted
   );
+
+  if (groupId) {
+    candidates = candidates.filter(c => c.groupId === groupId);
+  }
 
   if (!allowRepeat) {
     const existingWinnerIds = db.data.winners

@@ -214,6 +214,7 @@ export default function Console() {
             <RoundSetup
               activityId={currentActivity.id}
               rounds={rounds}
+              winners={winners}
               currentRoundId={currentRoundId}
               onUpdate={loadData}
               onSelectRound={setCurrentRoundId}

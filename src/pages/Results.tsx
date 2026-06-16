@@ -104,16 +104,14 @@ export default function Results() {
     ? validWinners.filter(w => w.roundId === filterRound)
     : validWinners;
 
-  const sortedWinners = [...filteredWinners].sort((a, b) => 
-    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
-
-  const unpackOrder = [...sortedWinners].sort((a, b) => {
+  const sortedWinners = [...filteredWinners].sort((a, b) => {
     const roundA = rounds.find(r => r.id === a.roundId)?.roundNumber || 0;
     const roundB = rounds.find(r => r.id === b.roundId)?.roundNumber || 0;
     if (roundA !== roundB) return roundA - roundB;
     return (a.drawOrder || 0) - (b.drawOrder || 0);
   });
+
+  const unpackOrder = sortedWinners; // 已有相同的排序
 
   const stats = {
     totalPrizes: rounds.reduce((sum, r) => sum + r.drawCount, 0),
@@ -374,7 +372,7 @@ export default function Results() {
 
                         {roundWinners.length > 0 ? (
                           <div className="grid grid-cols-4 gap-3">
-                            {roundWinners.map((winner, idx) => (
+                            {roundWinners.map((winner) => (
                               <div
                                 key={winner.id}
                                 className={`p-4 rounded-xl border ${
@@ -389,7 +387,7 @@ export default function Results() {
                                       ? 'bg-primary-500/30 text-primary-300'
                                       : 'bg-neon-gold/20 text-neon-gold'
                                   }`}>
-                                    {idx + 1}
+                                    {winner.drawOrder ?? '?'}
                                   </div>
                                   <div>
                                     <div className="font-bold text-white">
@@ -399,6 +397,11 @@ export default function Results() {
                                       {winner.candidate?.nickname || '匿名'}
                                     </div>
                                   </div>
+                                  {winner.isReplenishment && (
+                                    <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-300">
+                                      补位
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             ))}

@@ -23,19 +23,22 @@ export function DrawControl({ activityId, currentRound, candidates, winners, onU
   const { drawState, setDrawState } = useStore();
 
   const availableCandidates = candidates.filter(c => !c.isBlacklisted);
+  const groupedCandidates = currentRound?.groupId
+    ? availableCandidates.filter(c => c.groupId === currentRound.groupId)
+    : availableCandidates;
   const roundWinners = winners.filter(w => w.roundId === currentRound?.id && !w.isInvalid);
   const remainingCount = currentRound ? currentRound.drawCount - roundWinners.length : 0;
   const progress = currentRound ? (roundWinners.length / currentRound.drawCount) * 100 : 0;
 
   const getAvailablePool = useCallback(() => {
     if (!currentRound) return [];
-    const pool = availableCandidates;
+    const pool = groupedCandidates;
     if (!currentRound.allowRepeat) {
       const wonIds = new Set(roundWinners.map(w => w.candidateId));
       return pool.filter(c => !wonIds.has(c.id));
     }
     return pool;
-  }, [currentRound, availableCandidates, roundWinners]);
+  }, [currentRound, groupedCandidates, roundWinners]);
 
   const availablePool = getAvailablePool();
 
@@ -195,10 +198,13 @@ export function DrawControl({ activityId, currentRound, candidates, winners, onU
             <div className="flex-1">
               <h4 className="font-medium text-neon-gold mb-1">主持提示</h4>
               <p className="text-sm text-gray-300">
-                请确认本轮规则：{currentRound.name}，抽取 {currentRound.drawCount} 人，
+                本轮规则：{currentRound.name}，抽取 {currentRound.drawCount} 人，
                 {currentRound.allowRepeat ? '允许' : '不允许'}重复中奖，
-                {currentRound.mode === 'single' ? '单抽模式' : '连抽模式'}。
-                点击下方按钮开始抽取！
+                <span className={currentRound.mode === 'single' ? 'text-blue-300' : 'text-purple-300'}>
+                  {currentRound.mode === 'single' ? '单抽模式（点一次出1人）' : '连抽模式（一次抽完整轮）'}
+                </span>
+                {currentRound.groupId ? `，分组抽取` : ''}
+                。点击下方按钮开始抽取！
               </p>
             </div>
             <button
@@ -212,7 +218,7 @@ export function DrawControl({ activityId, currentRound, candidates, winners, onU
       )}
 
       <div className="rule-banner flex items-center justify-between">
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-6 flex-wrap">
           <div className="flex items-center gap-2">
             <Trophy className="text-neon-gold" size={18} />
             <span className="font-medium">{currentRound.name}</span>
@@ -225,10 +231,19 @@ export function DrawControl({ activityId, currentRound, candidates, winners, onU
             <Gift size={16} />
             <span>剩余名额：{remainingCount} / {currentRound.drawCount}</span>
           </div>
+          {remainingCount > 0 && remainingCount < currentRound.drawCount && currentRound.mode === 'single' && (
+            <div className="text-xs px-2 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300">
+              单抽进行中（还需 {remainingCount} 次）
+            </div>
+          )}
         </div>
         <div className="text-sm text-white/80">
-          {currentRound.mode === 'single' ? '单抽模式' : '连抽模式'} ·
-          {currentRound.allowRepeat ? ' 可重复' : ' 不可重复'}
+          <span className={currentRound.mode === 'single' ? 'text-blue-300' : 'text-purple-300'}>
+            {currentRound.mode === 'single' ? '单抽模式' : '连抽模式'}
+          </span>
+          {' · '}
+          {currentRound.allowRepeat ? '可重复' : '不可重复'}
+          {currentRound.groupId && ' · 分组抽取'}
         </div>
       </div>
 
@@ -331,13 +346,15 @@ export function DrawControl({ activityId, currentRound, candidates, winners, onU
       {roundWinners.length > 0 && (
         <div className="card-neon">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">本轮中奖名单</h3>
+            <h3 className="text-lg font-semibold text-white">本轮中奖名单（按抽取顺序）</h3>
             <span className="text-sm text-gray-400">
               已抽中 {roundWinners.length} / {currentRound.drawCount} 人
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {roundWinners.map((winner, index) => (
+            {[...roundWinners]
+              .sort((a, b) => (a.drawOrder || 0) - (b.drawOrder || 0))
+              .map((winner) => (
               <div
                 key={winner.id}
                 className={`p-4 rounded-xl border ${
@@ -353,7 +370,7 @@ export function DrawControl({ activityId, currentRound, candidates, winners, onU
                         ? 'bg-primary-500/30 text-primary-300'
                         : 'bg-neon-gold/20 text-neon-gold'
                     }`}>
-                      {index + 1}
+                      {winner.drawOrder ?? '?'}
                     </div>
                     <div>
                       <div className="font-medium text-white">
@@ -375,7 +392,7 @@ export function DrawControl({ activityId, currentRound, candidates, winners, onU
                     <button
                       onClick={() => handleRedraw(winner.id)}
                       className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      title="异常重抽"
+                      title="异常重抽（原结果无效，抽取新的补位）"
                     >
                       <AlertTriangle size={16} />
                     </button>

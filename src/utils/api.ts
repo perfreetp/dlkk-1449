@@ -74,10 +74,15 @@ export const api = {
     unarchive: (id: string) =>
       request<Activity>(`/activities/${id}/unarchive`, { method: 'POST' }),
     importCandidates: (id: string, formData: FormData) =>
-      request<{ imported: number }>(`/activities/${id}/import`, {
+      request<{ imported: number; skippedDuplicate: number; skippedBlacklist: number; skippedEmpty: number }>(`/activities/${id}/import`, {
         method: 'POST',
         body: formData,
         headers: {},
+      }),
+    signup: (id: string, data: { number: string; nickname?: string; password?: string }) =>
+      request<Candidate>(`/activities/${id}/signup`, {
+        method: 'POST',
+        body: JSON.stringify(data),
       }),
   },
 
@@ -101,6 +106,7 @@ export const api = {
       drawCount: number;
       allowRepeat: boolean;
       mode: 'single' | 'multi';
+      groupId?: string;
     }) =>
       request<DrawRound>(`/activities/${activityId}/rounds`, {
         method: 'POST',
@@ -112,14 +118,20 @@ export const api = {
       allowRepeat: boolean;
       mode: 'single' | 'multi';
       status: string;
+      groupId?: string;
     }>) =>
       request<DrawRound>(`/activities/${activityId}/rounds/${roundId}`, {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-    draw: (activityId: string, roundId: string) =>
+    remove: (activityId: string, roundId: string) =>
+      request(`/activities/${activityId}/rounds/${roundId}`, {
+        method: 'DELETE',
+      }),
+    draw: (activityId: string, roundId: string, drawCount?: number) =>
       request<{ winners: Winner[] }>(`/activities/${activityId}/rounds/${roundId}/draw`, {
         method: 'POST',
+        body: drawCount !== undefined ? JSON.stringify({ drawCount }) : undefined,
       }),
     redraw: (activityId: string, roundId: string, winnerId: string) =>
       request<{ winners: Winner[] }>(`/activities/${activityId}/rounds/${roundId}/redraw`, {
@@ -147,8 +159,8 @@ export const api = {
 
   blacklist: {
     list: () => request<Blacklist[]>('/blacklist'),
-    add: (data: { number: string; reason: string }) =>
-      request<Blacklist>('/blacklist', {
+    add: (data: { number: string; reason: string; autoRedraw?: boolean }) =>
+      request<{ blacklist: Blacklist; invalidatedWinnerCount: number; affectedWinners: Array<{ winnerId: string; roundId: string; activityId: string }>; message?: string }>('/blacklist', {
         method: 'POST',
         body: JSON.stringify(data),
       }),

@@ -11,6 +11,7 @@ export default function Settings() {
   const [newBlacklist, setNewBlacklist] = useState({ number: '', reason: '' });
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     loadBlacklist();
@@ -32,18 +33,32 @@ export default function Settings() {
     if (!newBlacklist.number.trim()) return;
 
     setLoading(true);
+    setFeedbackMsg(null);
     try {
       const res = await api.blacklist.add({
         number: newBlacklist.number.trim(),
         reason: newBlacklist.reason.trim(),
       });
-      if (res.success) {
+      if (res.success && res.data) {
         setShowAddModal(false);
         setNewBlacklist({ number: '', reason: '' });
+        const { invalidatedWinnerCount, message } = res.data;
+        if (invalidatedWinnerCount > 0) {
+          setFeedbackMsg({
+            type: 'success',
+            text: `已加入黑名单，并使 ${invalidatedWinnerCount} 条中奖记录失效。${message || ''} 建议到控制台对应轮次进行异常重抽补位。`,
+          });
+        } else {
+          setFeedbackMsg({ type: 'success', text: res.data.message || '已加入黑名单' });
+        }
         loadBlacklist();
+        setTimeout(() => setFeedbackMsg(null), 8000);
+      } else {
+        setFeedbackMsg({ type: 'error', text: res.message || res.error || '添加失败' });
       }
     } catch (error) {
       console.error('Add blacklist failed:', error);
+      setFeedbackMsg({ type: 'error', text: '添加失败，请稍后重试' });
     } finally {
       setLoading(false);
     }
@@ -92,6 +107,16 @@ export default function Settings() {
             </div>
           </div>
         </div>
+
+        {feedbackMsg && (
+          <div className={`mb-6 px-5 py-4 rounded-xl border ${
+            feedbackMsg.type === 'success'
+              ? 'bg-green-500/10 border-green-500/30 text-green-300'
+              : 'bg-red-500/10 border-red-500/30 text-red-300'
+          }`}>
+            {feedbackMsg.text}
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2">

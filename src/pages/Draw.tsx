@@ -20,6 +20,8 @@ export default function Draw() {
   const [signupNickname, setSignupNickname] = useState('');
   const [signupCode, setSignupCode] = useState('');
   const [signupSuccess, setSignupSuccess] = useState(false);
+  const [signupError, setSignupError] = useState<string | null>(null);
+  const [signupLoading, setSignupLoading] = useState(false);
   const [visibleDanmaku, setVisibleDanmaku] = useState<Danmaku[]>([]);
   const danmakuContainerRef = useRef<HTMLDivElement>(null);
   const danmakuTrackRef = useRef<number[]>([0, 0, 0, 0, 0]);
@@ -90,12 +92,15 @@ export default function Draw() {
   };
 
   const handleSignup = async () => {
-    if (!signupNumber.trim() || !signupNickname.trim() || !currentActivity) return;
+    if (!signupNumber.trim() || !currentActivity) return;
+    setSignupLoading(true);
+    setSignupError(null);
     
     try {
-      const res = await api.candidates.add(currentActivity.id, {
+      const res = await api.activities.signup(currentActivity.id, {
         number: signupNumber.trim(),
-        nickname: signupNickname.trim(),
+        nickname: signupNickname.trim() || undefined,
+        password: signupCode.trim(),
       });
       if (res.success) {
         setSignupSuccess(true);
@@ -105,13 +110,17 @@ export default function Draw() {
           setSignupNumber('');
           setSignupNickname('');
           setSignupCode('');
+          setSignupError(null);
           loadData();
-        }, 2000);
+        }, 2500);
       } else {
-        alert(res.message || '报名失败');
+        setSignupError(res.message || res.error || '报名失败，请检查信息');
       }
     } catch (error) {
       console.error('Signup failed:', error);
+      setSignupError('网络错误，请稍后重试');
+    } finally {
+      setSignupLoading(false);
     }
   };
 
@@ -120,7 +129,14 @@ export default function Draw() {
   const roundWinners = currentRound ? winners.filter(w => w.roundId === currentRound.id && !w.isInvalid) : [];
   const remainingCount = currentRound ? currentRound.drawCount - roundWinners.length : 0;
   const wonCandidateIds = new Set(winners.filter(w => !w.isInvalid).map(w => w.candidateId));
-  const availablePool = validCandidates.filter(c => !wonCandidateIds.has(c.id));
+  let currentRoundPool = currentRound
+    ? (currentRound.groupId ? validCandidates.filter(c => c.groupId === currentRound.groupId) : validCandidates)
+    : validCandidates;
+  if (currentRound && !currentRound.allowRepeat) {
+    const roundWonIds = new Set(roundWinners.map(w => w.candidateId));
+    currentRoundPool = currentRoundPool.filter(c => !roundWonIds.has(c.id));
+  }
+  const availablePool = currentRound ? currentRoundPool : validCandidates.filter(c => !wonCandidateIds.has(c.id));
 
   const stats = {
     total: validCandidates.length,
@@ -350,14 +366,17 @@ export default function Draw() {
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                     <Trophy className="text-neon-gold" size={20} />
-                    本轮中奖名单
+                    本轮中奖名单（按抽取顺序）
                   </h3>
                   <span className="text-sm text-gray-400">
                     已抽中 {roundWinners.length} / {currentRound.drawCount} 人
+                    {currentRound.mode === 'single' && remainingCount > 0 && ` · 单抽剩余 ${remainingCount} 次`}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  {roundWinners.map((winner, index) => (
+                  {[...roundWinners]
+                    .sort((a, b) => (a.drawOrder || 0) - (b.drawOrder || 0))
+                    .map((winner) => (
                     <div
                       key={winner.id}
                       className={`p-4 rounded-xl border ${
@@ -372,7 +391,7 @@ export default function Draw() {
                             ? 'bg-primary-500/30 text-primary-300'
                             : 'bg-neon-gold/20 text-neon-gold'
                         }`}>
-                          {index + 1}
+                          {winner.drawOrder ?? '?'}
                         </div>
                         <div>
                           <div className="font-bold text-white text-lg">
@@ -515,7 +534,11 @@ export default function Draw() {
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-display text-xl font-bold text-white">口令报名</h2>
               <button
-                onClick={() => setShowSignupModal(false)}
+                onClick={() => {
+                  setShowSignupModal(false);
+                  setSignupError(null);
+                  setSignupSuccess(false);
+                }}
                 className="p-2 rounded-lg hover:bg-white/10 transition-colors"
               >
                 <span className="text-gray-400 text-2xl">&times;</span>
@@ -528,10 +551,19 @@ export default function Draw() {
                   <Trophy className="text-neon-green" size={32} />
                 </div>
                 <h3 className="text-xl font-bold text-white mb-2">报名成功！</h3>
-                <p className="text-gray-400">你的编号已加入候选池</p>
+                <p className="text-gray-400">
+                  编号 <span className="text-neon-gold font-bold">{signupNumber}</span>
+                  {signupNickname && ` (${signupNickname})`} 已加入候选池
+                </p>
+                <p className="text-xs text-gray-500 mt-3">刷新页面也能在编号池中看到自己</p>
               </div>
             ) : (
               <div className="space-y-4">
+                {signupError && (
+                  <div className="px-4 py-3 rounded-xl border bg-red-500/10 border-red-500/30 text-red-300 text-sm">
+                    {signupError}
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">
                     你的编号 <span className="text-red-400">*</span>
@@ -546,7 +578,7 @@ export default function Draw() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">
-                    你的昵称 <span className="text-red-400">*</span>
+                    你的昵称（可选）
                   </label>
                   <input
                     type="text"
@@ -565,22 +597,25 @@ export default function Draw() {
                     value={signupCode}
                     onChange={(e) => setSignupCode(e.target.value)}
                     className="input-neon"
-                    placeholder="主播提供的报名口令"
+                    placeholder="主播提供的报名口令，口令不对无法加入"
                   />
                 </div>
                 <div className="flex gap-3 pt-4">
                   <button
-                    onClick={() => setShowSignupModal(false)}
+                    onClick={() => {
+                      setShowSignupModal(false);
+                      setSignupError(null);
+                    }}
                     className="btn-outline flex-1"
                   >
                     取消
                   </button>
                   <button
                     onClick={handleSignup}
-                    disabled={!signupNumber.trim() || !signupNickname.trim()}
-                    className="btn-neon flex-1"
+                    disabled={!signupNumber.trim() || signupLoading}
+                    className="btn-neon flex-1 disabled:opacity-50"
                   >
-                    立即报名
+                    {signupLoading ? '报名中...' : '立即报名'}
                   </button>
                 </div>
               </div>

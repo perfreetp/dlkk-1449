@@ -35,6 +35,7 @@ export interface DrawRound {
   drawCount: number;
   allowRepeat: boolean;
   mode: 'single' | 'multi';
+  groupId?: string;
   status: 'pending' | 'drawing' | 'completed';
   createdAt: string;
 }

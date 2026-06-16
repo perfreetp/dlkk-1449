@@ -169,39 +169,116 @@ router.post('/:id/import', requireAuth, upload.single('file'), async (req, res) 
     if (!file) {
       return sendError(res, '请上传文件');
     }
-    const workbook = XLSX.read(file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet) as Array<{ number?: string; nickname?: string; 编号?: string; 昵称?: string }>;
+
+    let data: Array<Record<string, unknown>> = [];
+    const ext = (file.originalname || '').toLowerCase().split('.').pop();
+
+    if (ext === 'csv') {
+      const csvString = file.buffer.toString('utf8');
+      const lines = csvString.split(/\r?\n/).filter(line => line.trim().length > 0);
+      if (lines.length === 0) {
+        return sendError(res, 'CSV 文件为空');
+      }
+      const headerLine = lines[0];
+      const headers = headerLine.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      const isHeader = headers.some(h => ['编号', 'number', '昵称', 'nickname', '序号'].includes(h));
+      for (let i = isHeader ? 1 : 0; i < lines.length; i++) {
+        const cols = lines[i].match(/("([^"]|"")*"|[^,]*)(,|$)/g) || [];
+        const values = cols.slice(0, headers.length || 2).map(c => c.replace(/,$/, '').trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+        if (isHeader) {
+          const row: Record<string, unknown> = {};
+          headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
+          data.push(row);
+        } else {
+          data.push({
+            编号: values[0] || '',
+            昵称: values[1] || '',
+          } as Record<string, unknown>);
+        }
+      }
+    } else {
+      try {
+        const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        data = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Array<Record<string, unknown>>;
+      } catch (e) {
+        return sendError(res, '无法解析 Excel 文件，请检查格式');
+      }
+    }
+
     await db.read();
-    const candidates: Candidate[] = [];
+    const activity = db.data.activities.find(a => a.id === id);
+    if (!activity) {
+      return sendError(res, '活动不存在', 404);
+    }
+
+    const blacklistNumbers = new Set(db.data.blacklist.map(b => b.number.trim()));
     const existingNumbers = new Set(
       db.data.candidates
         .filter(c => c.activityId === id)
-        .map(c => c.number)
+        .map(c => c.number.trim())
     );
+
+    const candidates: Candidate[] = [];
+    let skippedDup = 0;
+    let skippedBlacklist = 0;
+    let skippedEmpty = 0;
+
     for (const row of data) {
-      const number = row.number || row.编号;
-      const nickname = row.nickname || row.昵称;
-      if (!number) continue;
+      const number = (row.number ?? row['编号'] ?? row['序号'] ?? row['ID'] ?? row['id'] ?? '') as string;
+      const nickname = (row.nickname ?? row['昵称'] ?? row['姓名'] ?? row['name'] ?? row['Name'] ?? '') as string;
+      if (!number || !String(number).trim()) {
+        skippedEmpty++;
+        continue;
+      }
       const numStr = String(number).trim();
-      if (existingNumbers.has(numStr)) continue;
-      candidates.push({
+      if (existingNumbers.has(numStr)) {
+        skippedDup++;
+        continue;
+      }
+      const isBl = blacklistNumbers.has(numStr);
+      const candidate: Candidate = {
         id: generateId(),
         activityId: id,
         number: numStr,
-        nickname: nickname ? String(nickname).trim() : undefined,
-        isBlacklisted: false,
+        nickname: nickname && String(nickname).trim() ? String(nickname).trim() : undefined,
+        isBlacklisted: isBl,
         createdAt: new Date().toISOString(),
-      });
+      };
+      candidates.push(candidate);
       existingNumbers.add(numStr);
+      if (isBl) skippedBlacklist++;
     }
+
     db.data.candidates.push(...candidates);
     await db.write();
-    sendSuccess(res, { imported: candidates.length }, `成功导入 ${candidates.length} 条数据`);
+
+    if (req.session.user) {
+      db.data.operationLogs.push({
+        id: generateId(),
+        activityId: id,
+        operatorId: req.session.user.id,
+        operatorName: req.session.user.username,
+        action: `导入名单`,
+        actionType: 'candidate_add',
+        details: `成功导入 ${candidates.length} 人，跳过重复 ${skippedDup} 个，黑名单 ${skippedBlacklist} 个，空行 ${skippedEmpty} 个`,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+      await db.write();
+    }
+
+    sendSuccess(res, {
+      imported: candidates.length,
+      skippedDuplicate: skippedDup,
+      skippedBlacklist,
+      skippedEmpty,
+      blacklistedInImported: skippedBlacklist,
+    }, `成功导入 ${candidates.length} 条数据，跳过重复 ${skippedDup} 个${skippedBlacklist > 0 ? `，含黑名单 ${skippedBlacklist} 个` : ''}`);
   } catch (error) {
     console.error('Import error:', error);
-    sendError(res, '导入失败', 500);
+    sendError(res, '导入失败，请检查文件格式', 500, error instanceof Error ? error.message : undefined);
   }
 });
 
@@ -223,23 +300,38 @@ router.post('/:id/candidates', requireAuth, async (req, res) => {
     if (!number) {
       return sendError(res, '编号不能为空');
     }
+    const numStr = String(number).trim();
     await db.read();
-    const existing = db.data.candidates.find(c => c.activityId === id && c.number === number);
+    const existing = db.data.candidates.find(c => c.activityId === id && c.number === numStr);
     if (existing) {
       return sendError(res, '该编号已存在');
     }
+    const isBlacklisted = db.data.blacklist.some(b => b.number.trim() === numStr);
     const candidate: Candidate = {
       id: generateId(),
       activityId: id,
-      number: String(number),
-      nickname: nickname?.toString() || undefined,
+      number: numStr,
+      nickname: nickname?.toString().trim() || undefined,
       groupId,
-      isBlacklisted: false,
+      isBlacklisted,
       createdAt: new Date().toISOString(),
     };
     db.data.candidates.push(candidate);
+    if (req.session.user) {
+      db.data.operationLogs.push({
+        id: generateId(),
+        activityId: id,
+        operatorId: req.session.user.id,
+        operatorName: req.session.user.username,
+        action: `新增候选者`,
+        actionType: 'candidate_add',
+        details: `编号 ${numStr}${nickname ? `(${nickname})` : ''}${isBlacklisted ? ' [已在黑名单]' : ''}`,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+    }
     await db.write();
-    sendSuccess(res, candidate, '添加成功');
+    sendSuccess(res, candidate, isBlacklisted ? '添加成功（该编号已在黑名单）' : '添加成功');
   } catch (error) {
     sendError(res, '添加候选者失败', 500);
   }
@@ -253,11 +345,94 @@ router.delete('/:id/candidates/:candidateId', requireAuth, async (req, res) => {
     if (index === -1) {
       return sendError(res, '候选者不存在', 404);
     }
-    db.data.candidates.splice(index, 1);
+    const removed = db.data.candidates.splice(index, 1)[0];
+    if (req.session.user) {
+      db.data.operationLogs.push({
+        id: generateId(),
+        activityId: id,
+        operatorId: req.session.user.id,
+        operatorName: req.session.user.username,
+        action: `删除候选者`,
+        actionType: 'candidate_delete',
+        details: `编号 ${removed.number} ${removed.nickname ? `(${removed.nickname})` : ''}`,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+    }
     await db.write();
     sendSuccess(res, null, '删除成功');
   } catch (error) {
     sendError(res, '删除候选者失败', 500);
+  }
+});
+
+router.post('/:id/signup', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { number, nickname, password } = req.body;
+    if (!number) {
+      return sendError(res, '编号不能为空');
+    }
+    await db.read();
+    const activity = db.data.activities.find(a => a.id === id);
+    if (!activity) {
+      return sendError(res, '活动不存在', 404);
+    }
+    if (activity.status !== 'active') {
+      return sendError(res, '活动未开始或已结束');
+    }
+    if (activity.password) {
+      if (!password || String(password).trim() !== String(activity.password).trim()) {
+        return sendError(res, '报名口令不正确', 401);
+      }
+    }
+    const numStr = String(number).trim();
+    if (!numStr) {
+      return sendError(res, '编号不能为空');
+    }
+    const existing = db.data.candidates.find(c => c.activityId === id && c.number === numStr);
+    if (existing) {
+      if (existing.isBlacklisted) {
+        return sendError(res, '该编号已被禁止参与', 403);
+      }
+      return sendSuccess(res, existing, '该编号已报名，无需重复提交');
+    }
+    const inBlacklist = db.data.blacklist.some(b => b.number === numStr);
+    if (inBlacklist) {
+      return sendError(res, '该编号已被禁止参与', 403);
+    }
+    const candidate: Candidate = {
+      id: generateId(),
+      activityId: id,
+      number: numStr,
+      nickname: nickname?.toString().trim() || undefined,
+      isBlacklisted: false,
+      createdAt: new Date().toISOString(),
+    };
+    db.data.candidates.push(candidate);
+
+    db.data.operationLogs.push({
+      id: generateId(),
+      activityId: id,
+      operatorName: '观众口令报名',
+      action: `口令报名`,
+      actionType: 'candidate_add',
+      details: `编号 ${numStr}${nickname ? `(${nickname})` : ''}`,
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    await db.write();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(id).emit('candidate:new', candidate);
+    }
+
+    sendSuccess(res, candidate, '报名成功！你的编号已进入候选池');
+  } catch (error) {
+    console.error('Signup error:', error);
+    sendError(res, '报名失败，请稍后重试', 500);
   }
 });
 

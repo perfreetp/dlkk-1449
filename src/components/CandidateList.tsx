@@ -14,6 +14,7 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCandidate, setNewCandidate] = useState({ number: '', nickname: '' });
   const [loading, setLoading] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredCandidates = candidates.filter(
@@ -43,17 +44,40 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const validExts = ['.xlsx', '.xls', '.csv'];
+    const fileName = file.name.toLowerCase();
+    if (!validExts.some(ext => fileName.endsWith(ext))) {
+      setImportMsg('只支持 .xlsx、.xls、.csv 格式文件');
+      setTimeout(() => setImportMsg(null), 4000);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     const formData = new FormData();
     formData.append('file', file);
+    setLoading(true);
+    setImportMsg(null);
 
     try {
       const response = await api.activities.importCandidates(activityId, formData);
-      if (response.success) {
+      if (response.success && response.data) {
+        const { imported, skippedDuplicate, skippedBlacklist, skippedEmpty } = response.data;
+        const parts: string[] = [];
+        parts.push(`成功导入 ${imported} 人`);
+        if (skippedDuplicate > 0) parts.push(`跳过重复 ${skippedDuplicate} 个`);
+        if (skippedBlacklist > 0) parts.push(`黑名单 ${skippedBlacklist} 个`);
+        if (skippedEmpty > 0) parts.push(`空行 ${skippedEmpty} 个`);
+        setImportMsg(parts.join('，'));
         onUpdate();
+      } else {
+        setImportMsg(`导入失败：${response.message || response.error}`);
       }
     } catch (error) {
       console.error('Failed to import candidates:', error);
+      setImportMsg('导入失败，请检查文件格式');
     } finally {
+      setLoading(false);
+      setTimeout(() => setImportMsg(null), 5000);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -87,29 +111,40 @@ export function CandidateList({ activityId, candidates, onUpdate }: CandidateLis
           </p>
         </div>
         <div className="flex gap-2">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleImport}
-            accept=".xlsx,.xls,.csv"
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="btn-outline flex items-center gap-2 text-sm py-2"
-          >
-            <Upload size={16} />
-            导入名单
-          </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="btn-neon flex items-center gap-2 text-sm py-2"
-          >
-            <Plus size={16} />
-            添加
-          </button>
-        </div>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleImport}
+          accept=".xlsx,.xls,.csv"
+          className="hidden"
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={loading}
+          className="btn-outline flex items-center gap-2 text-sm py-2 disabled:opacity-50"
+        >
+          <Upload size={16} />
+          {loading ? '导入中...' : '导入名单'}
+        </button>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="btn-neon flex items-center gap-2 text-sm py-2"
+        >
+          <Plus size={16} />
+          添加
+        </button>
       </div>
+    </div>
+
+    {importMsg && (
+      <div className={`mb-4 px-4 py-3 rounded-xl text-sm border ${
+        importMsg.includes('成功') || importMsg.includes('导入') 
+          ? 'bg-green-500/10 border-green-500/30 text-green-300' 
+          : 'bg-red-500/10 border-red-500/30 text-red-300'
+      }`}>
+        {importMsg}
+      </div>
+    )}
 
       <div className="relative mb-4">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />

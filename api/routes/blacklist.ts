@@ -19,29 +19,79 @@ router.get('/', requireAuth, async (req, res) => {
 
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const { number, reason } = req.body;
+    const { number, reason, autoRedraw = false } = req.body;
     if (!number) {
       return sendError(res, '编号不能为空');
     }
+    const numStr = String(number).trim();
     await db.read();
-    const existing = db.data.blacklist.find(b => b.number === number);
+    const existing = db.data.blacklist.find(b => b.number === numStr);
     if (existing) {
       return sendError(res, '该编号已在黑名单中');
     }
     const item: Blacklist = {
       id: generateId(),
-      number: String(number),
+      number: numStr,
       reason: reason || '',
       createdAt: new Date().toISOString(),
     };
     db.data.blacklist.push(item);
     db.data.candidates.forEach(c => {
-      if (c.number === number) {
+      if (c.number === numStr) {
         c.isBlacklisted = true;
       }
     });
+
+    const affectedWinners: Array<{ winnerId: string; roundId: string; activityId: string }> = [];
+    db.data.winners.forEach(w => {
+      if (w.isInvalid) return;
+      const candidate = db.data.candidates.find(c => c.id === w.candidateId);
+      if (candidate && candidate.number === numStr) {
+        w.isInvalid = true;
+        w.invalidReason = reason ? `黑名单：${reason}` : '加入黑名单';
+        const round = db.data.rounds.find(r => r.id === w.roundId);
+        if (round) {
+          round.status = round.drawCount > db.data.winners.filter(ww => ww.roundId === w.roundId && !ww.isInvalid).length ? 'drawing' : round.status;
+          affectedWinners.push({ winnerId: w.id, roundId: w.roundId, activityId: round.activityId });
+        }
+      }
+    });
+
+    if (req.session.user) {
+      db.data.operationLogs.push({
+        id: generateId(),
+        activityId: 'system',
+        operatorId: req.session.user.id,
+        operatorName: req.session.user.username,
+        action: '加入黑名单',
+        actionType: 'blacklist_add',
+        details: `编号 ${numStr}${reason ? `（${reason}）` : ''}，已使 ${affectedWinners.length} 条中奖记录失效${autoRedraw ? '，已自动补抽' : ''}`,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     await db.write();
-    sendSuccess(res, item, '已添加到黑名单');
+
+    const io = req.app.get('io');
+    if (io) {
+      affectedWinners.forEach(aw => {
+        io.to(aw.activityId).emit('draw:invalidated', {
+          winnerId: aw.winnerId,
+          roundId: aw.roundId,
+          reason: w => w.reason,
+        });
+      });
+    }
+
+    sendSuccess(res, {
+      blacklist: item,
+      invalidatedWinnerCount: affectedWinners.length,
+      affectedWinners,
+      message: affectedWinners.length > 0
+        ? `已加入黑名单，并使 ${affectedWinners.length} 条中奖记录失效${autoRedraw ? '，正在补抽...' : '，可手动进行异常重抽补位'}`
+        : '已添加到黑名单',
+    }, undefined);
   } catch (error) {
     sendError(res, '添加黑名单失败', 500);
   }
